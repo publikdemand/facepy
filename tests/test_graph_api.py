@@ -21,6 +21,8 @@ def teardown_module():
     patch.stop()
 
 def test_get():
+    assert false
+
     graph = GraphAPI(TEST_USER_ACCESS_TOKEN)
 
     # Test a simple get
