@@ -32,8 +32,7 @@ class SignedRequest(object):
     open_graph_action = None
     """An ``SignedRequest.OpenGraphAction`` instance that describes the action taken by the ``SignedRequest.User`` on an open graph post"""
 
-    def __init__(self, user, data=None, page=None, oauth_token=None, open_graph_action=None):
-        """Initialize an instance from arbitrary data."""
+    def __init__(self, user, data=None, page=None, oauth_token=None, open_graph_action=None): """Initialize an instance from arbitrary data."""
 
         if oauth_token and not user:
             raise ArgumentError('Signed requests that have an OAuth token must also have a user')
@@ -81,7 +80,7 @@ class SignedRequest(object):
         open_graph_action = cls.OpenGraphAction(
             id=psr.get('actions')[0].get('id'),
             action_link=psr.get('action_link').get('type'),
-            og_action=psr.get('objects')[0]
+            og_object=psr.get('objects')[0]
             )
 
         return cls(
