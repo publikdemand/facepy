@@ -29,7 +29,10 @@ class SignedRequest(object):
     page = None
     """A ``SignedRequest.Page`` instance describing the Facebook page that the signed request was generated from."""
 
-    def __init__(self, user, data=None, page=None, oauth_token=None):
+    open_graph_action = None
+    """An ``SignedRequest.OpenGraphAction`` instance that describes the action taken by the ``SignedRequest.User`` on an open graph post"""
+
+    def __init__(self, user, data=None, page=None, oauth_token=None, open_graph_action=None):
         """Initialize an instance from arbitrary data."""
 
         if oauth_token and not user:
@@ -50,6 +53,8 @@ class SignedRequest(object):
 
         self.data = data
         self.page = page
+
+        self.open_graph_action = open_graph_action
 
     def parse(cls, signed_request, application_secret_key):
         """Initialize an instance from a signed request."""
@@ -72,6 +77,12 @@ class SignedRequest(object):
         expected_signature = hmac.new(application_secret_key, msg=encoded_payload, digestmod=hashlib.sha256).digest()
         if not signature == expected_signature:
             raise cls.Error("Signed request signature mismatch")
+
+        open_graph_action = cls.OpenGraphAction(
+            id=psr.get('actions')[0].get('id'),
+            action_link=psr.get('action_link').get('type'),
+            og_action=psr.get('objects')[0]
+            )
 
         return cls(
 
@@ -99,7 +110,8 @@ class SignedRequest(object):
             ) if 'page' in psr else None,
 
             # Populate miscellaneous data
-            data = psr.get('app_data', None)
+            data = psr.get('app_data', None),
+            open_graph_action=open_graph_action
         )
 
     parse = classmethod(parse)
@@ -176,6 +188,29 @@ class SignedRequest(object):
             'signature': encoded_signature,
             'payload': encoded_payload
         }
+
+    class OpenGraphAction(object):
+        """
+        The action, metadata, etc. for an OpenGraphAction
+        """
+        
+        id  = None
+        """An integer describing the open graph action that a user took an action against"""
+
+        action_link = None
+        """ Namespace and action taken by user against an opengraph action"""
+
+        og_object = None
+        """
+        OG uri for the open graph object
+        """
+
+        def __init__(self, id, action_link, og_object ):
+            self.id, self.action_link, self.og_object = id, action_link, og_object
+
+        def get_action(self):
+            return self.action_link.split(':')[-1]
+
 
     class Page(object):
         """
