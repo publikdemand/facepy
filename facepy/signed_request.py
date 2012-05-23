@@ -33,7 +33,6 @@ class SignedRequest(object):
     """An ``SignedRequest.OpenGraphAction`` instance that describes the action taken by the ``SignedRequest.User`` on an open graph post"""
 
     def __init__(self, user, data=None, page=None, oauth_token=None, open_graph_action=None): """Initialize an instance from arbitrary data."""
-
         if oauth_token and not user:
             raise ArgumentError('Signed requests that have an OAuth token must also have a user')
 
