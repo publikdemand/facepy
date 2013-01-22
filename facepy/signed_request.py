@@ -1,21 +1,20 @@
-from datetime import datetime
-
 import base64
 import hashlib
 import hmac
-import time
-import warnings
-
 try:
     import simplejson as json
 except ImportError:
-    import json
+    import json  # flake8: noqa
+import time
 
-from .exceptions import FacepyError
+from datetime import datetime
+
+from facepy.exceptions import *
+
 
 class SignedRequest(object):
     """
-    Facebook uses 'signed requests' to communicate with applications on the Facebook platform. See `Facebook's
+    Facebook uses "signed requests" to communicate with applications on the Facebook platform. See `Facebook's
     documentation on authentication <https://developers.facebook.com/docs/authentication/signed_request/>`_
     for more information.
     """
@@ -29,103 +28,86 @@ class SignedRequest(object):
     page = None
     """A ``SignedRequest.Page`` instance describing the Facebook page that the signed request was generated from."""
 
-    open_graph_action = None
-    """An ``SignedRequest.OpenGraphAction`` instance that describes the action taken by the ``SignedRequest.User`` on an open graph post"""
+    raw = None
+    """A string describing the signed request in its original format."""
 
-    def __init__(self, user, data=None, page=None, oauth_token=None, open_graph_action=None): 
-        """Initialize an instance from arbitrary data."""
-        if oauth_token and not user:
-            raise ArgumentError('Signed requests that have an OAuth token must also have a user')
+    def __init__(self, signed_request=None, application_secret_key=None, application_id=None):
+        """
+        Initialize a signed request.
 
-        if oauth_token:
-            warnings.warn('The \'oauth_token\' argument to SignedRequest#__init__ is deprecated; pass it to SignedRequest.User#__init__ instead')
+        :param signed_request: A string describing a signed request.
+        :param application_secret_key: A string describing a Facebook application's secret key.
+        """
+        self.signed_request = signed_request
+        self.application_secret_key = application_secret_key
+        self.application_id = application_id
 
-            self.user = self.User(
-                id = user.id,
-                age = user.age,
-                locale = user.locale,
-                country = user.country,
-                oauth_token = oauth_token
-            )
-        else:
-            self.user = user
+        self.raw = self.parse(signed_request, application_secret_key)
 
-        self.data = data
-        self.page = page
+        self.data = self.raw.get('app_data', None)
 
-        self.open_graph_action = open_graph_action
+        self.page = self.Page(
+            id=self.raw['page'].get('id'),
+            is_liked=self.raw['page'].get('liked'),
+            is_admin=self.raw['page'].get('admin')
+        ) if 'page' in self.raw else None
+
+        if not self.raw.has_key('user'):
+            self.fetch_user_data_and_token()
+
+        self.user = self.User(
+            id=self.raw.get('user_id'),
+            locale=self.raw['user'].get('locale', None),
+            country=self.raw['user'].get('country', None),
+            age=range(
+                self.raw['user']['age']['min'],
+                self.raw['user']['age']['max'] + 1 if 'max' in self.raw['user']['age'] else 100
+            ) if 'age' in self.raw['user'] else None,
+            oauth_token=self.User.OAuthToken(
+                token=self.raw['oauth_token'],
+                issued_at=datetime.fromtimestamp(self.raw['issued_at']),
+                expires_at=datetime.fromtimestamp(self.raw['expires']) if self.raw['expires'] > 0 else None
+            ) if 'oauth_token' in self.raw else None,
+        )
+
+    def fetch_user_data_and_token(self):
+        from urlparse import parse_qs
+        from . import GraphAPI, get_application_access_token
+
+        app_token = get_application_access_token(self.application_id, self.application_secret_key)
+        graph = GraphAPI(app_token)
+        
+        qs = graph.get('oauth/access_token', code=self.raw['code'], redirect_uri='', client_id=self.application_id, client_secret=self.application_secret_key)
+        self.raw['oauth_token'] = parse_qs(qs)['access_token'][0]
+        #import ipdb; ipdb.set_trace()
+        self.raw['expires'] = time.time() + int(parse_qs(qs)['expires'][0])
+        self.raw['user'] = graph.get(self.raw['user_id'])
 
     def parse(cls, signed_request, application_secret_key):
-        """Initialize an instance from a signed request."""
+        """Parse a signed request, returning a dictionary describing its payload."""
+        def decode(encoded):
+            padding = '=' * (len(encoded) % 4)
+            return base64.urlsafe_b64decode(encoded + padding)
+
         try:
             encoded_signature, encoded_payload = (str(string) for string in signed_request.split('.', 2))
-        except IndexError:
-            raise cls.Error("Signed request malformed")
+            signature = decode(encoded_signature)
+            signed_request_data = json.loads(decode(encoded_payload))
+        except (TypeError, ValueError):
+            raise SignedRequestError("Signed request had a corrupt payload")
 
-        def decode(string):
-            return base64.urlsafe_b64decode(string + "=" * ((4 - len(string) % 4) % 4))
-
-        signature = decode(encoded_signature)
-        payload = decode(encoded_payload)
-
-        psr = json.loads(payload)
-
-        if not psr['algorithm'] == 'HMAC-SHA256':
-            raise cls.Error("Signed request is using an unknown algorithm")
+        if signed_request_data.get('algorithm', '').upper() != 'HMAC-SHA256':
+            raise SignedRequestError("Signed request is using an unknown algorithm")
 
         expected_signature = hmac.new(application_secret_key, msg=encoded_payload, digestmod=hashlib.sha256).digest()
-        if not signature == expected_signature:
-            raise cls.Error("Signed request signature mismatch")
+        if signature != expected_signature:
+            raise SignedRequestError("Signed request signature mismatch")
 
-        open_graph_action = cls.OpenGraphAction(
-            id=psr.get('actions')[0].get('id'),
-            action_link=psr.get('action_link').get('type'),
-            og_object=psr.get('objects')[0]
-            )
-
-        return cls(
-
-            # Populate user data
-            user = cls.User(
-                id = psr.get('user_id'),
-                locale = psr['user'].get('locale', None),
-                country = psr['user'].get('country', None),
-                age = range(
-                    psr['user']['age']['min'],
-                    psr['user']['age']['max'] + 1 if 'max' in psr['user']['age'] else 100
-                ) if 'age' in psr['user'] else None,
-                oauth_token = cls.User.OAuthToken(
-                    token = psr['oauth_token'],
-                    issued_at = datetime.fromtimestamp(psr['issued_at']),
-                    expires_at = datetime.fromtimestamp(psr['expires']) if psr['expires'] > 0 else None
-                ) if 'oauth_token' in psr else None,
-            ),
-
-            # Populate page data
-            page = cls.Page(
-                id = psr['page']['id'],
-                is_liked = psr['page']['liked'],
-                is_admin = psr['page']['admin']
-            ) if 'page' in psr else None,
-
-            # Populate miscellaneous data
-            data = psr.get('app_data', None),
-            open_graph_action=open_graph_action
-        )
+        return signed_request_data
 
     parse = classmethod(parse)
 
-    @property
-    def oauth_token(self):
-        warnings.warn('SignedRequest#oauth_token is deprecated; use SignedRequest.User#oauth_token instead.')
-        return self.user.oauth_token
-
-    @classmethod
-    def OAuthToken(cls, *args, **kwargs):
-        warnings.warn('SignedRequest.OAuthToken is deprecated; use SignedRequest.User.OAuthToken instead.')
-        return cls.User.OAuthToken(*args, **kwargs)
-
-    def generate(self, application_secret_key):
+    def generate(self):
         """Generate a signed request from this instance."""
         payload = {
             'algorithm': 'HMAC-SHA256'
@@ -181,35 +163,16 @@ class SignedRequest(object):
             json.dumps(payload, separators=(',', ':'))
         )
 
-        encoded_signature = base64.urlsafe_b64encode(hmac.new(application_secret_key, encoded_payload, hashlib.sha256).digest())
+        encoded_signature = base64.urlsafe_b64encode(hmac.new(
+            self.application_secret_key,
+            encoded_payload,
+            hashlib.sha256
+        ).digest())
 
         return '%(signature)s.%(payload)s' % {
             'signature': encoded_signature,
             'payload': encoded_payload
         }
-
-    class OpenGraphAction(object):
-        """
-        The action, metadata, etc. for an OpenGraphAction
-        """
-        
-        id  = None
-        """An integer describing the open graph action that a user took an action against"""
-
-        action_link = None
-        """ Namespace and action taken by user against an opengraph action"""
-
-        og_object = None
-        """
-        OG uri for the open graph object
-        """
-
-        def __init__(self, id, action_link, og_object ):
-            self.id, self.action_link, self.og_object = id, action_link, og_object
-
-        def get_action(self):
-            return self.action_link.split(':')[-1]
-
 
     class Page(object):
         """
@@ -231,10 +194,9 @@ class SignedRequest(object):
         def __init__(self, id, is_liked=False, is_admin=False):
             self.id, self.is_liked, self.is_admin = id, is_liked, is_admin
 
-        def _get_url(self):
+        @property
+        def url(self):
             return 'http://facebook.com/%s' % self.id
-
-        url = property(_get_url)
 
     class User(object):
         """
@@ -299,5 +261,5 @@ class SignedRequest(object):
                 else:
                     return self.expires_at < datetime.now()
 
-    class Error(FacepyError):
-        """Exception raised for invalid signed_request processing."""
+    # Proxy exceptions for ease of use and backwards compatibility.
+    Error = SignedRequestError

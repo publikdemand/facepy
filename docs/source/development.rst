@@ -23,16 +23,27 @@ There are a number of ways to get involved with Facepy:
 
 * **Submit patches or new features.** Create a fork and send me a pull request on `Github`_!
 
+Please note that, although difficult, facepy tries to be as PEP8 compliant as
+possible. Thus, before contributing, please try to see if you have PEP8
+warnings in your source by running::
+
+    $ make pep8
+
 Tests
 -----
 
-Facepy has an exhaustive test suite that you should run with `nose`_::
+Facepy has an exhaustive test suite that runs under Python 2.6, Python 2.7 and PyPy::
 
-    $ nosetests
+    $ make test
+
+To generate a test coverage report::
+
+    $ make report
 
 .. note::
 
-  You will need to install the `nose`_ and `mock`_  libraries in order to run the tests.
+  To run the tests, you will need to install the `tox`_, `nose`_ and `mock`_ libraries.
+  To generate the coverage report, you will also need the `nose-cov`_ plugin.
 
 Releases
 --------
@@ -72,6 +83,8 @@ Major and minor releases do not mark the end of the previous line or lines of de
   were found in 1.1 that affected 0.9 and could be easily applied, a new 0.9.x version might be released.
 
 .. _nose: http://readthedocs.org/docs/nose/en/latest/
+.. _tox: http://tox.testrun.org/
+.. _nose-cov: http://pypi.python.org/pypi/nose-cov/
 .. _issue tracker: https://github.com/jgorset/facepy/issues
 .. _Github: http://github.com
 .. _PEP-8: http://www.python.org/dev/peps/pep-0008/
